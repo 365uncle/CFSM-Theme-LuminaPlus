@@ -19,6 +19,20 @@ describe("normalizeThemeSettings", () => {
     );
   });
 
+  it("defaults traffic mode and distinguishes all/none node selections", () => {
+    const base = normalizeThemeSettings({});
+    expect(base.trafficTimeMode).toBe("boot");
+    expect(base.trafficIncludedNodes).toBeNull();
+    expect(base.speedIncludedNodes).toBeNull();
+    expect(base.detailIncludedNodes).toEqual([]);
+
+    expect(normalizeThemeSettings({ trafficTimeMode: "period" }).trafficTimeMode).toBe("period");
+    expect(normalizeThemeSettings({ trafficIncludedNodes: [] }).trafficIncludedNodes).toEqual([]);
+    expect(
+      normalizeThemeSettings({ detailIncludedNodes: "A,B\nC" } as never).detailIncludedNodes,
+    ).toEqual(["A", "B", "C"]);
+  });
+
   it("defaults overview ratings on unless explicitly disabled", () => {
     expect(normalizeThemeSettings({}).showOverviewRatings).toBe(true);
     expect(normalizeThemeSettings({ showOverviewRatings: false }).showOverviewRatings).toBe(false);

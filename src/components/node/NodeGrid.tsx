@@ -8,7 +8,6 @@ import { useDragReorder } from "@/hooks/useDragReorder";
 import {
   useAllNodeMeta,
   useHomeNodeSummaries,
-  useNodeOnlineSummaries,
   useNodeStoreStatus,
 } from "@/hooks/useNode";
 import { useHomepagePingOverview } from "@/hooks/usePingOverview";
@@ -20,8 +19,10 @@ import {
   formatByteRate,
   formatByteRateLabel,
 } from "@/utils/format";
-import { calculateCostSummary, formatCnyMoney, getExchangeRates } from "@/utils/cost";
+import { calculateCostSummary, getExchangeRates } from "@/utils/cost";
 import { useHiddenNodeUuids } from "@/hooks/useVisibleNodes";
+import { collectMatchingNodeUuids } from "@/utils/nodeIdentity";
+import { computeTrafficUsed, resolveTrafficUsage } from "@/utils/traffic";
 import { speedRateColor } from "@/utils/metricTone";
 import {
   getHomeGroupLabel,
@@ -49,9 +50,7 @@ import { MiniNodeCard } from "./MiniNodeCard";
 import { NodeCard } from "./NodeCard";
 import { NodeListView } from "./NodeListView";
 import { RegionTabs } from "./RegionTabs";
-import { RenewalReminder } from "./RenewalReminder";
-import type { NodeViewMode } from "@/utils/themeSettings";
-import type { RenewalReminderSource } from "@/utils/renewalReminder";
+import type { NodeViewMode, TrafficTimeMode } from "@/utils/themeSettings";
 
 // 卡片视图网格密度；列表档由独立组件布局。
 const GRID_LAYOUT: Record<NodeViewMode, { className: string; minColumnWidth: number }> = {
@@ -79,15 +78,56 @@ interface HomeOverview {
   totalNodes: number;
   onlineNodes: number;
   offlineNodes: number;
+  /** 勾选节点按各自 traffic_limit_type 计算出的合计（不是原始 ↑+↓）。 */
+  trafficTotal: number;
+  /** 勾选节点的原始累计上行/下行，仅用于卡片副行展示。 */
   trafficUp: number;
   trafficDown: number;
   netUp: number;
   netDown: number;
 }
 
+interface TrafficDetailRow {
+  uuid: string;
+  name: string;
+  used: number;
+  remaining: number;
+  unlimited: boolean;
+  /** null = 不重置；其余为距离下次重置的自然日数。 */
+  resetDays: number | null;
+}
+
 function formatCompactBytes(value: number): string {
   const [amount, unit = "B"] = formatBytes(value).split(" ");
   return `${amount}${unit[0]}`;
+}
+
+/** 与 Agent 的 actualResetDate 对齐：当月没有该日时顺延到次月 1 日。 */
+function nextResetDate(resetDay: number, now: Date): Date {
+  const build = (year: number, month: number): Date => {
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    if (resetDay <= lastDay) return new Date(year, month, resetDay, 0, 0, 0, 0);
+    return new Date(year, month + 1, 1, 0, 0, 0, 0);
+  };
+  let next = build(now.getFullYear(), now.getMonth());
+  if (next.getTime() <= now.getTime()) {
+    next = build(now.getFullYear(), now.getMonth() + 1);
+  }
+  return next;
+}
+
+/** 浏览器本地时区下的自然日数；Agent 按服务器本地时区重置，跨时区时可能差一天。 */
+function daysUntilReset(resetDay: number, nowMs: number): number | null {
+  if (!Number.isFinite(resetDay) || resetDay < 1 || resetDay > 31) return null;
+  const now = new Date(nowMs);
+  const next = nextResetDate(resetDay, now);
+  return Math.max(0, Math.ceil((next.getTime() - now.getTime()) / 86_400_000));
+}
+
+function formatResetLabel(resetDays: number | null): string {
+  if (resetDays == null) return t("home.trafficDetailNoReset");
+  if (resetDays <= 0) return t("home.trafficDetailResetToday");
+  return t("home.trafficDetailReset", { days: resetDays });
 }
 
 // 站点铭牌由 CSS 放进 AppShell 顶部留白，不占概览卡内容流。
@@ -103,52 +143,33 @@ function HomeBrand({ siteName }: { siteName: string }) {
 
 function HomeOverviewCards({
   overview,
-  costSummary,
-  costLoading,
-  costRatesMissing,
+  trafficTimeMode,
+  detailRows,
+  showDetailCard,
   showOverviewRatings,
   showTrafficRating,
   showBandwidthRating,
-  showAssetRating,
   trafficRatingLabels,
   bandwidthRatingLabels,
-  assetRatingLabels,
-  showDetailButton,
-  showAssetCard,
-  renewalReminderDays,
-  renewalNodes,
   dense,
 }: {
   overview: HomeOverview;
-  costSummary: { remainingCny: number } | null;
-  costLoading: boolean;
-  costRatesMissing: boolean;
+  trafficTimeMode: TrafficTimeMode;
+  detailRows: TrafficDetailRow[];
+  showDetailCard: boolean;
   dense: boolean;
   showOverviewRatings: boolean;
   showTrafficRating: boolean;
   showBandwidthRating: boolean;
-  showAssetRating: boolean;
   trafficRatingLabels: string;
   bandwidthRatingLabels: string;
-  assetRatingLabels: string;
-  showDetailButton: boolean;
-  showAssetCard: boolean;
-  renewalReminderDays: number;
-  renewalNodes: RenewalReminderSource[];
 }) {
-  const [trafficValue, trafficUnit] = formatBytes(
-    overview.trafficUp + overview.trafficDown,
-  ).split(" ");
+  const [trafficValue, trafficUnit] = formatBytes(overview.trafficTotal).split(" ");
   const rate = formatByteRate(overview.netUp + overview.netDown);
   const onlinePct =
     overview.totalNodes > 0 ? (overview.onlineNodes / overview.totalNodes) * 100 : 0;
   const offlinePct =
     overview.totalNodes > 0 ? (overview.offlineNodes / overview.totalNodes) * 100 : 0;
-  const remainingValue = costSummary
-    ? formatCnyMoney(costSummary.remainingCny)
-    : costLoading
-      ? t("home.assetsCalculating")
-      : "—";
   const trafficDetailLabel = `↑ ${formatBytes(overview.trafficUp)} · ↓ ${formatBytes(overview.trafficDown)}`;
   const trafficCompactLabel = `↑${formatCompactBytes(overview.trafficUp)} ↓${formatCompactBytes(overview.trafficDown)}`;
   const bandwidthDetailLabel = `↑ ${formatByteRateLabel(overview.netUp)} · ↓ ${formatByteRateLabel(overview.netDown)}`;
@@ -157,7 +178,7 @@ function HomeOverviewCards({
     showOverviewRatings && showTrafficRating
       ? getOverviewRating({
           kind: "traffic",
-          value: overview.trafficUp + overview.trafficDown,
+          value: overview.trafficTotal,
           customLabels: trafficRatingLabels,
         })
       : null;
@@ -169,15 +190,6 @@ function HomeOverviewCards({
           customLabels: bandwidthRatingLabels,
         })
       : null;
-  const assetRating =
-    showOverviewRatings && showAssetRating && costSummary
-      ? getOverviewRating({
-          kind: "asset",
-          value: costSummary.remainingCny,
-          customLabels: assetRatingLabels,
-        })
-      : null;
-
   const renderRating = (rating: OverviewRating | null) =>
     rating ? (
       <span className="overview-card-rating" data-rating-level={rating.level} title={rating.label}>
@@ -189,7 +201,7 @@ function HomeOverviewCards({
     // 资产卡可以单独关掉，列数跟着实际张数走，不然右边空一格。
     <section
       className={`home-overview${dense ? " is-dense" : ""}`}
-      data-cards={showAssetCard ? 4 : 3}
+      data-cards={showDetailCard ? 4 : 3}
       aria-label={t("home.overviewLabel")}
     >
       <article className="overview-card" data-metric="online">
@@ -244,7 +256,9 @@ function HomeOverviewCards({
 
       <article className="overview-card" data-metric="traffic">
         <div className="overview-card-head">
-          <span className="overview-card-label">{t("home.totalTraffic")}</span>
+          <span className="overview-card-label" title={t("home.trafficCalcHint")}>
+            {trafficTimeMode === "period" ? t("home.periodTraffic") : t("home.totalTraffic")}
+          </span>
         </div>
         <div className="overview-card-main">
           <p className="overview-card-value">
@@ -261,25 +275,40 @@ function HomeOverviewCards({
         </div>
       </article>
 
-      {showAssetCard && (
-      <article className="overview-card" data-metric="asset">
-        <div className="overview-card-head">
-          <span className="overview-card-label">{t("home.assets")}</span>
-          {/* 提醒天数设成 0 时这个组件没有提醒可显示，会退成资产页入口图标。 */}
-          {showDetailButton && (
-            <RenewalReminder nodes={renewalNodes} warningDays={renewalReminderDays} />
-          )}
-        </div>
-        <div className="overview-card-main">
-          <p className="overview-card-value">{remainingValue}</p>
-        </div>
-        <div className="overview-card-footer">
-          <p className="overview-card-caption">
-            {costRatesMissing ? t("home.ratesFailed") : t("home.ratesLive")}
-          </p>
-          {renderRating(assetRating)}
-        </div>
-      </article>
+      {showDetailCard && (
+        <article className="overview-card" data-metric="traffic-detail">
+          <div className="overview-card-head">
+            <span className="overview-card-label">{t("home.trafficDetail")}</span>
+          </div>
+          <div className="traffic-detail-list">
+            {detailRows.length === 0 ? (
+              <span className="traffic-detail-empty">{t("home.trafficDetailEmpty")}</span>
+            ) : (
+              detailRows.map((row) => (
+                <div
+                  key={row.uuid}
+                  className="traffic-detail-row"
+                  title={`${row.name} · ${t("home.trafficDetailUsed", { value: formatBytes(row.used) })} · ${
+                    row.unlimited
+                      ? t("home.trafficDetailUnlimited")
+                      : t("home.trafficDetailRemaining", { value: formatBytes(row.remaining) })
+                  } · ${formatResetLabel(row.resetDays)}`}
+                >
+                  <span className="traffic-detail-name">{row.name}</span>
+                  <span className="traffic-detail-meta">
+                    {t("home.trafficDetailUsed", { value: formatBytes(row.used) })}
+                    {" · "}
+                    {row.unlimited
+                      ? t("home.trafficDetailUnlimited")
+                      : t("home.trafficDetailRemaining", { value: formatBytes(row.remaining) })}
+                    {" · "}
+                    {formatResetLabel(row.resetDays)}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
       )}
     </section>
   );
@@ -409,7 +438,6 @@ function GroupTabs({
 export function NodeGrid() {
   const now = useHourlyClock();
   const nodes = useHomeNodeSummaries();
-  const nodeOnlineSummaries = useNodeOnlineSummaries();
   const allMeta = useAllNodeMeta();
   const { hydrated: storeHydrated, nodeInfoError } = useNodeStoreStatus();
   const { data: me } = useAuth();
@@ -443,47 +471,108 @@ export function NodeGrid() {
       ),
     [allMeta, me?.logged_in, hiddenUuids],
   );
-  const renewalNodes = useMemo<RenewalReminderSource[]>(() => {
-    const onlineByUuid = new Map(
-      nodeOnlineSummaries.map((node) => [node.uuid, node.online]),
-    );
-    return visibleMeta.map((node) => ({
-      ...node,
-      online: onlineByUuid.get(node.uuid) ?? null,
-    }));
-  }, [nodeOnlineSummaries, visibleMeta]);
+  const metaByUuid = useMemo(
+    () => new Map(visibleMeta.map((node) => [node.uuid, node])),
+    [visibleMeta],
+  );
   // 「名称」排序需要展示名(摘要无 name),从 meta 注入。
   const nameByUuid = useMemo(() => {
     const map = new Map<string, string>();
     for (const node of visibleMeta) map.set(node.uuid, node.name?.trim() || node.uuid);
     return map;
   }, [visibleMeta]);
+  // null = 全部可见节点；[] = 全不统计；非空 = 只统计匹配的节点。
+  const trafficIncludedUuids = useMemo(
+    () =>
+      themeSettings.trafficIncludedNodes === null
+        ? null
+        : collectMatchingNodeUuids(visibleMeta, themeSettings.trafficIncludedNodes),
+    [themeSettings.trafficIncludedNodes, visibleMeta],
+  );
+  const speedIncludedUuids = useMemo(
+    () =>
+      themeSettings.speedIncludedNodes === null
+        ? null
+        : collectMatchingNodeUuids(visibleMeta, themeSettings.speedIncludedNodes),
+    [themeSettings.speedIncludedNodes, visibleMeta],
+  );
+  const detailIncludedUuids = useMemo(
+    () => collectMatchingNodeUuids(visibleMeta, themeSettings.detailIncludedNodes ?? []),
+    [themeSettings.detailIncludedNodes, visibleMeta],
+  );
   const overview = useMemo<HomeOverview>(() => {
     let onlineNodes = 0;
     let offlineNodes = 0;
+    let trafficTotal = 0;
     let trafficUp = 0;
     let trafficDown = 0;
     let netUp = 0;
     let netDown = 0;
+    const period = themeSettings.trafficTimeMode === "period";
     for (const node of visibleNodes) {
       if (node.online === true) onlineNodes += 1;
       else if (node.online === false) offlineNodes += 1;
-      trafficUp += node.trafficUp;
-      trafficDown += node.trafficDown;
-      netUp += node.netUp;
-      netDown += node.netDown;
+
+      if (trafficIncludedUuids === null || trafficIncludedUuids.has(node.uuid)) {
+        const meta = metaByUuid.get(node.uuid);
+        const up = period ? node.trafficUpMonthly ?? 0 : node.trafficUp;
+        const down = period ? node.trafficDownMonthly ?? 0 : node.trafficDown;
+        trafficUp += up;
+        trafficDown += down;
+        // 按每台探针后台的「月流量计算类型」取数；缺 meta 时退回上下行合计。
+        trafficTotal += meta ? computeTrafficUsed(meta.traffic_limit_type, up, down) : up + down;
+      }
+
+      if (speedIncludedUuids === null || speedIncludedUuids.has(node.uuid)) {
+        netUp += node.netUp;
+        netDown += node.netDown;
+      }
     }
 
     return {
       totalNodes: visibleNodes.length,
       onlineNodes,
       offlineNodes,
+      trafficTotal,
       trafficUp,
       trafficDown,
       netUp,
       netDown,
     };
-  }, [visibleNodes]);
+  }, [
+    metaByUuid,
+    speedIncludedUuids,
+    themeSettings.trafficTimeMode,
+    trafficIncludedUuids,
+    visibleNodes,
+  ]);
+
+  // 明细卡固定用「当前周期 + 每台配额口径」：剩余/重置只有周期口径才有意义。
+  const detailRows = useMemo<TrafficDetailRow[]>(() => {
+    if (detailIncludedUuids.size === 0) return [];
+    const summaries = new Map(visibleNodes.map((node) => [node.uuid, node]));
+    const rows: TrafficDetailRow[] = [];
+    for (const meta of visibleMeta) {
+      if (!detailIncludedUuids.has(meta.uuid)) continue;
+      const summary = summaries.get(meta.uuid);
+      const usage = resolveTrafficUsage(
+        meta.traffic_limit_type,
+        summary?.trafficUpMonthly ?? 0,
+        summary?.trafficDownMonthly ?? 0,
+        meta.traffic_limit,
+      );
+      rows.push({
+        uuid: meta.uuid,
+        name: meta.name?.trim() || meta.uuid,
+        used: usage.used,
+        remaining: usage.remaining,
+        unlimited: usage.unlimited,
+        resetDays: daysUntilReset(meta.traffic_reset_day, now),
+      });
+      if (rows.length >= 3) break;
+    }
+    return rows;
+  }, [detailIncludedUuids, now, visibleMeta, visibleNodes]);
   // 顶部「实时带宽」是跨节点求和，各节点相位不同会让它一秒内变好几次。
   // 单独按 1 秒节拍统一换一次；卡片仍按各自节奏刷新。
   const pacedNet = usePacedRate(overview.netUp, overview.netDown);
@@ -493,15 +582,14 @@ export function NodeGrid() {
   );
   const showHomeOverview = themeSettings.isReady && themeSettings.showHomeOverview;
   const hasNodes = visibleMeta.length > 0;
-  // 「资产概览」把每月花多少钱亮给所有访客，单独一个开关，不跟着整排总览走。
-  const showAssetCard = showHomeOverview && hasNodes && themeSettings.showAssetOverview;
-  // 资产页入口只有一个开关：资产卡在就放卡内按钮，不在就用悬浮按钮，两个位置互斥。
+  // 「流量明细」卡复用原资产卡的开关；单独一个开关，不跟着整排总览走。
+  const showDetailCard = showHomeOverview && hasNodes && themeSettings.showAssetOverview;
+  // 资产页保留悬浮入口；明细卡不再承载资产金额，避免入口丢失。
   const showCostEntry = themeSettings.isReady && themeSettings.showCostSummary && hasNodes;
-  const showCostDetailButton = showCostEntry && showAssetCard;
-  const showCostFloatingButton = showCostEntry && !showAssetCard;
+  const showCostFloatingButton = showCostEntry;
 
   useEffect(() => {
-    if (!showCostDetailButton && !showCostFloatingButton) return;
+    if (!showCostFloatingButton) return;
 
     const idleWindow = window as IdleCapableWindow;
     if (idleWindow.requestIdleCallback) {
@@ -512,10 +600,10 @@ export function NodeGrid() {
     // Safari 等无 requestIdleCallback 的浏览器，在首页稳定后再低优先级预取。
     const handle = window.setTimeout(preloadAssetsPage, 1_000);
     return () => window.clearTimeout(handle);
-  }, [showCostDetailButton, showCostFloatingButton]);
+  }, [showCostFloatingButton]);
 
-  // 资产入口存在时预热汇率，供概览、价格排序和资产页复用。
-  const costNeeded = showAssetCard || showCostFloatingButton;
+  // 资产入口存在时预热汇率，供价格排序和资产页复用。
+  const costNeeded = showCostFloatingButton;
   const rateQuery = useQuery({
     queryKey: ["cost-rates", themeSettings.costRateApiUrl],
     queryFn: ({ signal }) => getExchangeRates(themeSettings.costRateApiUrl, { signal }),
@@ -554,8 +642,6 @@ export function NodeGrid() {
     }
     return map;
   }, [costSummary]);
-  const costLoading = costNeeded && ratesFetching;
-  const costRatesMissing = costNeeded && !rateQuery.data && !ratesFetching;
   const groupOptions = useMemo(
     () =>
       sortHomeGroupOptions(
@@ -758,23 +844,15 @@ export function NodeGrid() {
       {showHomeOverview && (
         <HomeOverviewCards
           overview={displayOverview}
+          trafficTimeMode={themeSettings.trafficTimeMode}
+          detailRows={detailRows}
+          showDetailCard={showDetailCard}
           dense={mode === "mini" || mode === "list"}
-          showDetailButton={showCostDetailButton}
-          showAssetCard={showAssetCard}
-          renewalReminderDays={
-            themeSettings.isReady ? themeSettings.renewalReminderDays : 0
-          }
-          renewalNodes={renewalNodes}
-          costSummary={costSummary}
-          costLoading={costLoading}
-          costRatesMissing={costRatesMissing}
           showOverviewRatings={themeSettings.showOverviewRatings}
           showTrafficRating={themeSettings.showTrafficRating}
           showBandwidthRating={themeSettings.showBandwidthRating}
-          showAssetRating={themeSettings.showAssetRating}
           trafficRatingLabels={themeSettings.trafficRatingLabels}
           bandwidthRatingLabels={themeSettings.bandwidthRatingLabels}
-          assetRatingLabels={themeSettings.assetRatingLabels}
         />
       )}
     </>

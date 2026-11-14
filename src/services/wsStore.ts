@@ -60,6 +60,9 @@ export interface HomeNodeSummary {
   online: boolean | null;
   trafficUp: number;
   trafficDown: number;
+  /** 本计费周期累计；首页「周期流量」/明细卡使用。旧快照或测试可缺省。 */
+  trafficUpMonthly?: number;
+  trafficDownMonthly?: number;
   netUp: number;
   netDown: number;
 }
@@ -1697,11 +1700,13 @@ export function getHomeNodeSummariesSnapshot(): HomeNodeSummary[] {
         // 按周期重置的配额进度另用 trafficUpMonthly / trafficDownMonthly。
         trafficUp: metrics?.trafficUp ?? 0,
         trafficDown: metrics?.trafficDown ?? 0,
+        trafficUpMonthly: metrics?.trafficUpMonthly ?? 0,
+        trafficDownMonthly: metrics?.trafficDownMonthly ?? 0,
         netUp: realtimeNetUp,
         netDown: realtimeNetDown,
       };
     })
-    .filter((item): item is HomeNodeSummary => Boolean(item));
+    .filter((item): item is NonNullable<typeof item> => item !== null);
 
   if (
     next.length === homeNodeSummariesSnapshot.length &&
@@ -1717,6 +1722,8 @@ export function getHomeNodeSummariesSnapshot(): HomeNodeSummary[] {
         prev.online === item.online &&
         prev.trafficUp === item.trafficUp &&
         prev.trafficDown === item.trafficDown &&
+        prev.trafficUpMonthly === item.trafficUpMonthly &&
+        prev.trafficDownMonthly === item.trafficDownMonthly &&
         prev.netUp === item.netUp &&
         prev.netDown === item.netDown
       );

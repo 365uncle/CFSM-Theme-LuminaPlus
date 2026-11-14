@@ -36,6 +36,8 @@ import {
 
 export type Appearance = "system" | "light" | "dark";
 export type NodeViewMode = "large" | "compact" | "mini" | "list";
+/** 顶部累计流量卡的时间口径：本次开机以来 / 当前计费周期。 */
+export type TrafficTimeMode = "boot" | "period";
 
 export interface ResolvedThemeSettings {
   defaultAppearance: Appearance;
@@ -52,8 +54,15 @@ export interface ResolvedThemeSettings {
   homepageMultiPingTaskIds: number[];
   homepagePingLineOverrides: PingLineOverridesByNode;
   showHomeOverview: boolean;
-  /** 顶部总览里的「资产概览」卡（把每月花多少钱亮给所有访客，单独给个开关）。 */
+  /** 顶部总览里的「资产概览」卡；现已改为「流量明细」卡，保留字段名兼容旧配置。 */
   showAssetOverview: boolean;
+  trafficTimeMode: TrafficTimeMode;
+  /** null = 全部节点；[] = 全不统计；非空 = 只统计匹配的节点。 */
+  trafficIncludedNodes: string[] | null;
+  /** 实时速度卡独立的节点白名单；null = 全部，[] = 全不统计。 */
+  speedIncludedNodes: string[] | null;
+  /** 明细卡显示节点；默认空，最多 3 台。 */
+  detailIncludedNodes: string[] | null;
   showGroupTabs: boolean;
   showRegionBar: boolean;
   showCardGroup: boolean;
@@ -105,6 +114,10 @@ export const DEFAULT_THEME_SETTINGS: ResolvedThemeSettings = {
   homepagePingLineOverrides: EMPTY_PING_LINE_OVERRIDES_BY_NODE,
   showHomeOverview: true,
   showAssetOverview: true,
+  trafficTimeMode: "boot",
+  trafficIncludedNodes: null,
+  speedIncludedNodes: null,
+  detailIncludedNodes: [],
   showGroupTabs: true,
   showRegionBar: true,
   showCardGroup: true,
@@ -211,6 +224,15 @@ function normalizePlainText(value: unknown) {
   return typeof value === "string" ? value : "";
 }
 
+/** null/缺席 = 不启用白名单（全部）；显式空数组 = 全不统计。 */
+function normalizeNodeSelection(value: unknown): string[] | null {
+  return value == null ? null : normalizeNodeIdentityList(value);
+}
+
+function normalizeTrafficTimeMode(value: unknown): TrafficTimeMode {
+  return value === "period" ? "period" : "boot";
+}
+
 // 管理员默认排序:字段非法回落 default;方向非法时回落该字段的自然方向(文本升、数值降)。
 function normalizeHomeSortDefault(
   field: unknown,
@@ -266,6 +288,11 @@ export function normalizeThemeSettings(
     homepagePingLineOverrides: normalizePingLineOverridesByNode(settings?.homepagePingLineOverrides),
     showHomeOverview: enabledUnlessFalse(settings?.showHomeOverview),
     showAssetOverview: enabledUnlessFalse(settings?.showAssetOverview),
+    trafficTimeMode: normalizeTrafficTimeMode(settings?.trafficTimeMode),
+    trafficIncludedNodes: normalizeNodeSelection(settings?.trafficIncludedNodes),
+    speedIncludedNodes: normalizeNodeSelection(settings?.speedIncludedNodes),
+    // 明细卡默认不显示任何节点；缺席与显式空数组同义。
+    detailIncludedNodes: normalizeNodeSelection(settings?.detailIncludedNodes) ?? [],
     showGroupTabs: enabledUnlessFalse(settings?.showGroupTabs),
     showRegionBar: enabledUnlessFalse(settings?.showRegionBar),
     showCardGroup: enabledUnlessFalse(settings?.showCardGroup),

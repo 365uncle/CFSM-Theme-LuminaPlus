@@ -91,6 +91,52 @@
 .overview-card[data-metric="traffic"] { --metric-accent: var(--traffic-up); }
 .overview-card[data-metric="bandwidth"] { --metric-accent: var(--speed-high); }
 .overview-card[data-metric="asset"] { --metric-accent: var(--accent-500); }
+.overview-card[data-metric="traffic-detail"] { --metric-accent: var(--traffic-down); }
+
+/* 明细卡：一行一台，最多 3 行；字号比大数字卡小，避免把 148px 高的卡撑开。 */
+.traffic-detail-list {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.traffic-detail-empty {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.traffic-detail-row {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.traffic-detail-name {
+  flex: 0 0 auto;
+  max-width: 34%;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.traffic-detail-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 暗色依靠表面色阶建立层级，不叠白色顶光或指标色氛围。背景图模式仍由 --surface-a
    保留用户配置的透明度。 */

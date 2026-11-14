@@ -490,6 +490,14 @@ export interface ThemeSettings {
   homepagePingLineOverrides?: Record<string, Record<string, number>>;
   fakePingForUnbound?: boolean;
   showHomeOverview?: boolean;
+  /** 顶部累计流量卡的时间口径：开机累计 / 当前计费周期。 */
+  trafficTimeMode?: "boot" | "period";
+  /** null = 全部节点；[] = 全不统计；非空 = 只统计匹配的节点。 */
+  trafficIncludedNodes?: string[] | null;
+  /** 实时速度卡独立的节点白名单，语义同 trafficIncludedNodes。 */
+  speedIncludedNodes?: string[] | null;
+  /** 明细卡显示的节点，语义同 trafficIncludedNodes（默认空）。 */
+  detailIncludedNodes?: string[] | null;
   showGroupTabs?: boolean;
   showRegionBar?: boolean;
   showCardGroup?: boolean;

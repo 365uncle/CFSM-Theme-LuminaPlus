@@ -148,7 +148,6 @@ const OVERVIEW_RATING_LABEL_FIELDS: Array<{
 }> = [
   { key: "traffic", get title() { return t("home.totalTraffic"); }, toggleKey: "showTrafficRating" },
   { key: "bandwidth", get title() { return t("home.liveBandwidth"); }, toggleKey: "showBandwidthRating" },
-  { key: "asset", get title() { return t("home.assets"); }, toggleKey: "showAssetRating" },
 ];
 
 /** 选项多的分段控件排几列：4 个以内一行放完，再多就对半分成两行（8 个 → 4 + 4），不留孤零零的一个。 */
@@ -305,6 +304,10 @@ function pickManagedThemeSettings(settings: ResolvedThemeSettings) {
     homepageMultiPingTaskIds: settings.homepageMultiPingTaskIds,
     showHomeOverview: settings.showHomeOverview,
     showAssetOverview: settings.showAssetOverview,
+    trafficTimeMode: settings.trafficTimeMode,
+    trafficIncludedNodes: settings.trafficIncludedNodes,
+    speedIncludedNodes: settings.speedIncludedNodes,
+    detailIncludedNodes: settings.detailIncludedNodes,
     showGroupTabs: settings.showGroupTabs,
     showRegionBar: settings.showRegionBar,
     showCardGroup: settings.showCardGroup,
@@ -478,6 +481,157 @@ function SettingSelect({
     </div>
   );
 }
+
+/** 首页统计用的节点勾选列表；value=null 且 emptyMeansAll 时表示“全部”。 */
+const NodeChecklist = memo(function NodeChecklist({
+  title,
+  hint,
+  nodes,
+  value,
+  onChange,
+  max,
+  emptyMeansAll = true,
+}: {
+  title: string;
+  hint?: string;
+  nodes: NodeInfo[];
+  value: string[] | null;
+  onChange: (next: string[] | null) => void;
+  /** 最多可选几台；不传 = 不限。 */
+  max?: number;
+  /** null 是否表示全选。明细卡默认 false（null/空都表示不显示）。 */
+  emptyMeansAll?: boolean;
+}) {
+  const [search, setSearch] = useState("");
+  const selectedUuids = useMemo(() => {
+    if (value === null && emptyMeansAll) return new Set(nodes.map((node) => node.uuid));
+    return new Set(value ?? []);
+  }, [emptyMeansAll, nodes, value]);
+  const selectedCount = selectedUuids.size;
+  const allSelected = nodes.length > 0 && selectedCount === nodes.length;
+  const filtered = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return nodes;
+    return nodes.filter((node) =>
+      [node.name, node.uuid, node.group, node.region].some((field) =>
+        String(field ?? "").toLowerCase().includes(keyword),
+      ),
+    );
+  }, [nodes, search]);
+
+  const toggle = (uuid: string, checked: boolean) => {
+    if (checked && max != null && selectedCount >= max && !selectedUuids.has(uuid)) return;
+    if (emptyMeansAll && value === null) {
+      // null = 全选；取消一台时展开成“除这台之外”的显式列表。
+      if (checked) return;
+      onChange(nodes.filter((node) => node.uuid !== uuid).map((node) => node.uuid));
+      return;
+    }
+    const next = new Set(value ?? []);
+    if (checked) next.add(uuid);
+    else next.delete(uuid);
+    onChange(emptyMeansAll && next.size === nodes.length ? null : [...next]);
+  };
+
+  const selectAll = () => {
+    if (emptyMeansAll) {
+      onChange(null);
+    } else {
+      onChange(nodes.slice(0, max ?? nodes.length).map((node) => node.uuid));
+    }
+  };
+
+  return (
+    <div className="surface-inset px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="setting-subhead-title">{title}</div>
+          {hint && <div className="mt-1 setting-hint">{hint}</div>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="setting-hint">
+            {t("settings.selectedNodes", { n: selectedCount, total: nodes.length })}
+          </span>
+          {max == null && (
+            <button
+              type="button"
+              className="theme-manage-button is-compact"
+              disabled={nodes.length === 0 || allSelected}
+              onClick={selectAll}
+            >
+              {allSelected ? t("settings.allSelected") : t("settings.selectAll")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="theme-manage-button is-compact"
+            disabled={selectedCount === 0}
+            onClick={() => onChange([])}
+          >
+            {t("settings.clearNodes")}
+          </button>
+        </div>
+      </div>
+
+      <label className="surface-inset mt-3 flex items-center gap-2 px-3 py-2">
+        <Search size={14} className="text-[var(--text-tertiary)]" />
+        <input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder={t("settings.searchNodesPlaceholder")}
+          aria-label={t("settings.searchNodes")}
+          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-tertiary)]"
+        />
+      </label>
+
+      {filtered.length === 0 ? (
+        <div className="mt-3 text-[12px] text-[var(--text-tertiary)]">
+          {t("settings.noMatchingNodes")}
+        </div>
+      ) : (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((node) => {
+            const checked = selectedUuids.has(node.uuid);
+            const disabled = !checked && max != null && selectedCount >= max;
+            return (
+              <label
+                key={node.uuid}
+                className={clsx(
+                  "flex cursor-pointer items-start gap-3 rounded-[12px] border px-3 py-3 transition-colors",
+                  checked
+                    ? "border-[var(--border-strong)] bg-[color-mix(in_srgb,var(--hover-bg)_72%,transparent)]"
+                    : "border-[var(--hairline)] bg-transparent hover:bg-[var(--hover-bg)]",
+                  disabled && "cursor-not-allowed opacity-45",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  disabled={disabled}
+                  onChange={(event) => toggle(node.uuid, event.target.checked)}
+                  className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent-500)]"
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <Flag region={node.region} size={14} />
+                    <span className="truncate setting-subhead-title">{node.name}</span>
+                  </div>
+                  <div className="mt-1 setting-hint">
+                    {[node.group, node.uuid].filter(Boolean).join(" · ") || node.region || t("settings.noGroup")}
+                  </div>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      {max != null && (
+        <div className="mt-2 setting-hint">{t("settings.maxSelectedNodes", { n: max })}</div>
+      )}
+    </div>
+  );
+});
 
 const EMPTY_ASSIGNED_CLIENTS: string[] = [];
 const EMPTY_ADMIN_CLIENTS: NodeInfo[] = [];
@@ -1831,6 +1985,63 @@ export function ThemeManage() {
                     onPatch={patch}
                   />
                 </div>
+              </InstancePanel>
+
+              <InstancePanel
+                id="set-home-traffic"
+                kicker={t("settings.kickerTraffic")}
+                title={t("settings.trafficOverview")}
+                aside={<ListFilter size={16} />}
+              >
+                <div className="max-w-md">
+                  <div className="setting-subhead">
+                    <span className="setting-subhead-title">{t("settings.trafficTimeMode")}</span>
+                  </div>
+                  <SettingSelect
+                    value={draft.trafficTimeMode}
+                    onChange={(event) =>
+                      patch("trafficTimeMode", event.target.value === "period" ? "period" : "boot")
+                    }
+                    aria-label={t("settings.trafficTimeMode")}
+                  >
+                    <option value="boot">{t("settings.trafficTimeBoot")}</option>
+                    <option value="period">{t("settings.trafficTimePeriod")}</option>
+                  </SettingSelect>
+                  <p className="mt-2 setting-hint">{t("settings.trafficTimeHint")}</p>
+                </div>
+
+                <div className="mt-4 grid gap-3">
+                  <NodeChecklist
+                    title={t("settings.trafficNodes")}
+                    hint={t("settings.trafficNodesHint")}
+                    nodes={sortedClients}
+                    value={draft.trafficIncludedNodes}
+                    onChange={(next) => patch("trafficIncludedNodes", next)}
+                  />
+                  <NodeChecklist
+                    title={t("settings.speedNodes")}
+                    hint={t("settings.speedNodesHint")}
+                    nodes={sortedClients}
+                    value={draft.speedIncludedNodes}
+                    onChange={(next) => patch("speedIncludedNodes", next)}
+                  />
+                  <NodeChecklist
+                    title={t("settings.detailNodes")}
+                    hint={t("settings.detailNodesHint")}
+                    nodes={sortedClients}
+                    value={draft.detailIncludedNodes}
+                    onChange={(next) => patch("detailIncludedNodes", next)}
+                    max={3}
+                    emptyMeansAll={false}
+                  />
+                </div>
+
+                {clientsLoading && (
+                  <div className="mt-3 flex items-center gap-2 setting-hint">
+                    <Spinner size={14} />
+                    {t("settings.groupsLoading")}
+                  </div>
+                )}
               </InstancePanel>
 
               <InstancePanel
