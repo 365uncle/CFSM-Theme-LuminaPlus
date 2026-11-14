@@ -138,6 +138,119 @@
   text-overflow: ellipsis;
 }
 
+/* 三列/百分比版明细：上面“已使用 + 各台百分比”，下面各台短名。 */
+.traffic-detail-percent-grid {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+  margin-top: 0;
+}
+
+.traffic-detail-total-block {
+  display: flex;
+  align-self: center;
+  justify-self: start;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.traffic-detail-percent-caption {
+  color: var(--text-tertiary);
+  font-size: 20px;
+  font-weight: 560;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* 合并后的左列：周期总流量 + 上下行副行，整体替代“已使用”标签。 */
+.traffic-detail-percent-total {
+  display: flex;
+  align-self: center;
+  justify-self: start;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* 上下行副行放到标头右侧，给卡身留出三列空间。 */
+.traffic-detail-head-sub {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 20px;
+  font-weight: 560;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.traffic-detail-percent-number {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: var(--text-primary);
+  font-size: 36px;
+  font-weight: 760;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+
+.traffic-detail-percent-unit {
+  color: var(--text-tertiary);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.traffic-detail-percent-sub {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 20px;
+  font-weight: 560;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+}
+
+.traffic-detail-percent-value {
+  min-width: 0;
+  overflow: hidden;
+  justify-self: center;
+  font-size: 36px;
+  font-weight: 760;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.traffic-detail-percent-name {
+  min-width: 0;
+  overflow: hidden;
+  justify-self: center;
+  color: var(--text-secondary);
+  font-size: 20px;
+  font-weight: 560;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 暗色依靠表面色阶建立层级，不叠白色顶光或指标色氛围。背景图模式仍由 --surface-a
    保留用户配置的透明度。 */
 :root[data-appearance="dark"] .overview-card {

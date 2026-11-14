@@ -39,6 +39,7 @@ import { useHomeNodeOrder } from "@/hooks/useHomeNodeOrder";
 import { useHourlyClock } from "@/hooks/useClock";
 import { usePacedRate } from "@/hooks/usePacedRate";
 import { preloadAssetsPage } from "@/services/assetsPageLoader";
+import { refreshServersSnapshot } from "@/services/wsStore";
 import { getLocalThemeSettings, saveLocalThemeSettings } from "@/services/themeSettingsStore";
 import { HomeSortControl } from "./HomeSortControl";
 import {
@@ -50,7 +51,7 @@ import { MiniNodeCard } from "./MiniNodeCard";
 import { NodeCard } from "./NodeCard";
 import { NodeListView } from "./NodeListView";
 import { RegionTabs } from "./RegionTabs";
-import type { NodeViewMode, TrafficTimeMode } from "@/utils/themeSettings";
+import type { NodeViewMode } from "@/utils/themeSettings";
 
 // 卡片视图网格密度；列表档由独立组件布局。
 const GRID_LAYOUT: Record<NodeViewMode, { className: string; minColumnWidth: number }> = {
@@ -68,6 +69,8 @@ const UUID_KEY_SEPARATOR = ",";
 /** 汇率接口失败时的占位，保持引用稳定，让 useMemo 不会每次渲染都重算。 */
 const EMPTY_RATES: Record<string, number> = {};
 const EMPTY_REGION_ORDER: string[] = [];
+/** 周期/明细数据不在 WS 里，低频补拉一次完整快照。 */
+const SERVER_SNAPSHOT_REFRESH_MS = 5 * 60 * 1000;
 
 type IdleCapableWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
@@ -85,14 +88,21 @@ interface HomeOverview {
   trafficDown: number;
   netUp: number;
   netDown: number;
+  /** 第二张实时带宽卡的合计。 */
+  netUp2: number;
+  netDown2: number;
 }
 
 interface TrafficDetailRow {
   uuid: string;
   name: string;
+  /** 卡片里用的短名：取最后一个下划线后的部分，避免 3 列放不下。 */
+  shortName: string;
   used: number;
   remaining: number;
   unlimited: boolean;
+  /** 配额使用百分比；不限流量为 null。 */
+  percent: number | null;
   /** null = 不重置；其余为距离下次重置的自然日数。 */
   resetDays: number | null;
 }
@@ -130,6 +140,15 @@ function formatResetLabel(resetDays: number | null): string {
   return t("home.trafficDetailReset", { days: resetDays });
 }
 
+/** 0–25 / 26–50 / 51–75 / 76–100 四段，对应实时带宽的四档颜色。 */
+function percentColor(percent: number | null): string {
+  if (percent == null) return "var(--text-secondary)";
+  if (percent <= 25) return "var(--speed-idle)";
+  if (percent <= 50) return "var(--speed-low)";
+  if (percent <= 75) return "var(--speed-high)";
+  return "var(--speed-max)";
+}
+
 // 站点铭牌由 CSS 放进 AppShell 顶部留白，不占概览卡内容流。
 function HomeBrand({ siteName }: { siteName: string }) {
   return (
@@ -143,50 +162,46 @@ function HomeBrand({ siteName }: { siteName: string }) {
 
 function HomeOverviewCards({
   overview,
-  trafficTimeMode,
   detailRows,
   showDetailCard,
   showOverviewRatings,
-  showTrafficRating,
   showBandwidthRating,
-  trafficRatingLabels,
   bandwidthRatingLabels,
   dense,
 }: {
   overview: HomeOverview;
-  trafficTimeMode: TrafficTimeMode;
   detailRows: TrafficDetailRow[];
   showDetailCard: boolean;
   dense: boolean;
   showOverviewRatings: boolean;
-  showTrafficRating: boolean;
   showBandwidthRating: boolean;
-  trafficRatingLabels: string;
   bandwidthRatingLabels: string;
 }) {
-  const [trafficValue, trafficUnit] = formatBytes(overview.trafficTotal).split(" ");
+  const [detailTotalValue, detailTotalUnit] = formatBytes(overview.trafficTotal).split(" ");
   const rate = formatByteRate(overview.netUp + overview.netDown);
+  const rate2 = formatByteRate(overview.netUp2 + overview.netDown2);
   const onlinePct =
     overview.totalNodes > 0 ? (overview.onlineNodes / overview.totalNodes) * 100 : 0;
   const offlinePct =
     overview.totalNodes > 0 ? (overview.offlineNodes / overview.totalNodes) * 100 : 0;
   const trafficDetailLabel = `↑ ${formatBytes(overview.trafficUp)} · ↓ ${formatBytes(overview.trafficDown)}`;
-  const trafficCompactLabel = `↑${formatCompactBytes(overview.trafficUp)} ↓${formatCompactBytes(overview.trafficDown)}`;
   const bandwidthDetailLabel = `↑ ${formatByteRateLabel(overview.netUp)} · ↓ ${formatByteRateLabel(overview.netDown)}`;
   const bandwidthCompactLabel = `↑${formatCompactBytes(overview.netUp)} ↓${formatCompactBytes(overview.netDown)}`;
-  const trafficRating =
-    showOverviewRatings && showTrafficRating
-      ? getOverviewRating({
-          kind: "traffic",
-          value: overview.trafficTotal,
-          customLabels: trafficRatingLabels,
-        })
-      : null;
+  const bandwidth2DetailLabel = `↑ ${formatByteRateLabel(overview.netUp2)} · ↓ ${formatByteRateLabel(overview.netDown2)}`;
+  const bandwidth2CompactLabel = `↑${formatCompactBytes(overview.netUp2)} ↓${formatCompactBytes(overview.netDown2)}`;
   const bandwidthRating =
     showOverviewRatings && showBandwidthRating
       ? getOverviewRating({
           kind: "bandwidth",
           value: overview.netUp + overview.netDown,
+          customLabels: bandwidthRatingLabels,
+        })
+      : null;
+  const bandwidth2Rating =
+    showOverviewRatings && showBandwidthRating
+      ? getOverviewRating({
+          kind: "bandwidth",
+          value: overview.netUp2 + overview.netDown2,
           customLabels: bandwidthRatingLabels,
         })
       : null;
@@ -235,7 +250,7 @@ function HomeOverviewCards({
       </article>
 
       <article className="overview-card" data-metric="bandwidth">
-        <span className="overview-card-label">{t("home.liveBandwidth")}</span>
+        <span className="overview-card-label">{t("home.liveBandwidth1")}</span>
         <div className="overview-card-main">
           <p
             className="overview-card-value"
@@ -254,24 +269,23 @@ function HomeOverviewCards({
         </div>
       </article>
 
-      <article className="overview-card" data-metric="traffic">
-        <div className="overview-card-head">
-          <span className="overview-card-label" title={t("home.trafficCalcHint")}>
-            {trafficTimeMode === "period" ? t("home.periodTraffic") : t("home.totalTraffic")}
-          </span>
-        </div>
+      <article className="overview-card" data-metric="bandwidth-2">
+        <span className="overview-card-label">{t("home.liveBandwidth2")}</span>
         <div className="overview-card-main">
-          <p className="overview-card-value">
-            {trafficValue}
-            <span className="overview-card-unit">{trafficUnit}</span>
+          <p
+            className="overview-card-value"
+            style={{ color: speedRateColor(rate2.unit) }}
+          >
+            {rate2.value}
+            <span className="overview-card-unit">{rate2.unit}</span>
           </p>
         </div>
         <div className="overview-card-footer">
-          <p className="overview-card-sub" title={trafficDetailLabel}>
-            <span className="overview-card-sub-full">{trafficDetailLabel}</span>
-            <span className="overview-card-sub-compact">{trafficCompactLabel}</span>
+          <p className="overview-card-sub" title={bandwidth2DetailLabel}>
+            <span className="overview-card-sub-full">{bandwidth2DetailLabel}</span>
+            <span className="overview-card-sub-compact">{bandwidth2CompactLabel}</span>
           </p>
-          {renderRating(trafficRating)}
+          {renderRating(bandwidth2Rating)}
         </div>
       </article>
 
@@ -279,35 +293,63 @@ function HomeOverviewCards({
         <article className="overview-card" data-metric="traffic-detail">
           <div className="overview-card-head">
             <span className="overview-card-label">{t("home.trafficDetail")}</span>
+            <span className="traffic-detail-head-sub" title={trafficDetailLabel}>
+              {trafficDetailLabel}
+            </span>
           </div>
-          <div className="traffic-detail-list">
-            {detailRows.length === 0 ? (
+          {detailRows.length === 0 ? (
+            <div className="traffic-detail-list">
               <span className="traffic-detail-empty">{t("home.trafficDetailEmpty")}</span>
-            ) : (
-              detailRows.map((row) => (
-                <div
-                  key={row.uuid}
-                  className="traffic-detail-row"
+            </div>
+          ) : (
+            <div
+              className="traffic-detail-percent-grid"
+              style={{
+                gridTemplateColumns: `minmax(132px, auto) repeat(${detailRows.length}, minmax(0, 1fr))`,
+              }}
+            >
+              <span
+                className="traffic-detail-total-block"
+                style={{ gridColumn: 1, gridRow: "1 / span 2" }}
+              >
+                <span className="traffic-detail-percent-number">
+                  {detailTotalValue}
+                  <span className="traffic-detail-percent-unit">{detailTotalUnit}</span>
+                </span>
+                <span className="traffic-detail-percent-caption">
+                  {t("home.trafficDetailUsedLabel")}
+                </span>
+              </span>
+              {detailRows.map((row, index) => (
+                <span
+                  key={`${row.uuid}-percent`}
+                  className="traffic-detail-percent-value"
+                  style={{
+                    gridColumn: index + 2,
+                    gridRow: 1,
+                    color: percentColor(row.percent),
+                  }}
                   title={`${row.name} · ${t("home.trafficDetailUsed", { value: formatBytes(row.used) })} · ${
                     row.unlimited
                       ? t("home.trafficDetailUnlimited")
                       : t("home.trafficDetailRemaining", { value: formatBytes(row.remaining) })
                   } · ${formatResetLabel(row.resetDays)}`}
                 >
-                  <span className="traffic-detail-name">{row.name}</span>
-                  <span className="traffic-detail-meta">
-                    {t("home.trafficDetailUsed", { value: formatBytes(row.used) })}
-                    {" · "}
-                    {row.unlimited
-                      ? t("home.trafficDetailUnlimited")
-                      : t("home.trafficDetailRemaining", { value: formatBytes(row.remaining) })}
-                    {" · "}
-                    {formatResetLabel(row.resetDays)}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
+                  {row.percent == null ? "∞" : `${row.percent}%`}
+                </span>
+              ))}
+              {detailRows.map((row, index) => (
+                <span
+                  key={`${row.uuid}-name`}
+                  className="traffic-detail-percent-name"
+                  style={{ gridColumn: index + 2, gridRow: 2 }}
+                  title={row.name}
+                >
+                  {row.shortName}
+                </span>
+              ))}
+            </div>
+          )}
         </article>
       )}
     </section>
@@ -496,6 +538,13 @@ export function NodeGrid() {
         : collectMatchingNodeUuids(visibleMeta, themeSettings.speedIncludedNodes),
     [themeSettings.speedIncludedNodes, visibleMeta],
   );
+  const speed2IncludedUuids = useMemo(
+    () =>
+      themeSettings.speed2IncludedNodes === null
+        ? null
+        : collectMatchingNodeUuids(visibleMeta, themeSettings.speed2IncludedNodes),
+    [themeSettings.speed2IncludedNodes, visibleMeta],
+  );
   const detailIncludedUuids = useMemo(
     () => collectMatchingNodeUuids(visibleMeta, themeSettings.detailIncludedNodes ?? []),
     [themeSettings.detailIncludedNodes, visibleMeta],
@@ -508,6 +557,8 @@ export function NodeGrid() {
     let trafficDown = 0;
     let netUp = 0;
     let netDown = 0;
+    let netUp2 = 0;
+    let netDown2 = 0;
     const period = themeSettings.trafficTimeMode === "period";
     for (const node of visibleNodes) {
       if (node.online === true) onlineNodes += 1;
@@ -527,6 +578,10 @@ export function NodeGrid() {
         netUp += node.netUp;
         netDown += node.netDown;
       }
+      if (speed2IncludedUuids === null || speed2IncludedUuids.has(node.uuid)) {
+        netUp2 += node.netUp;
+        netDown2 += node.netDown;
+      }
     }
 
     return {
@@ -538,9 +593,12 @@ export function NodeGrid() {
       trafficDown,
       netUp,
       netDown,
+      netUp2,
+      netDown2,
     };
   }, [
     metaByUuid,
+    speed2IncludedUuids,
     speedIncludedUuids,
     themeSettings.trafficTimeMode,
     trafficIncludedUuids,
@@ -561,12 +619,15 @@ export function NodeGrid() {
         summary?.trafficDownMonthly ?? 0,
         meta.traffic_limit,
       );
+      const name = meta.name?.trim() || meta.uuid;
       rows.push({
         uuid: meta.uuid,
-        name: meta.name?.trim() || meta.uuid,
+        name,
+        shortName: name.includes("_") ? name.split("_").pop() || name : name,
         used: usage.used,
         remaining: usage.remaining,
         unlimited: usage.unlimited,
+        percent: usage.unlimited ? null : Math.round(usage.fraction * 100),
         resetDays: daysUntilReset(meta.traffic_reset_day, now),
       });
       if (rows.length >= 3) break;
@@ -576,12 +637,29 @@ export function NodeGrid() {
   // 顶部「实时带宽」是跨节点求和，各节点相位不同会让它一秒内变好几次。
   // 单独按 1 秒节拍统一换一次；卡片仍按各自节奏刷新。
   const pacedNet = usePacedRate(overview.netUp, overview.netDown);
+  const pacedNet2 = usePacedRate(overview.netUp2, overview.netDown2);
   const displayOverview = useMemo<HomeOverview>(
-    () => ({ ...overview, netUp: pacedNet.up, netDown: pacedNet.down }),
-    [overview, pacedNet],
+    () => ({
+      ...overview,
+      netUp: pacedNet.up,
+      netDown: pacedNet.down,
+      netUp2: pacedNet2.up,
+      netDown2: pacedNet2.down,
+    }),
+    [overview, pacedNet, pacedNet2],
   );
   const showHomeOverview = themeSettings.isReady && themeSettings.showHomeOverview;
   const hasNodes = visibleMeta.length > 0;
+
+  // 周期流量/明细来自 /api/servers 快照，WS 只推实时字段；每 5 分钟补拉一次。
+  useEffect(() => {
+    if (!themeSettings.isReady) return;
+    const tick = () => {
+      if (!document.hidden) refreshServersSnapshot();
+    };
+    const timer = window.setInterval(tick, SERVER_SNAPSHOT_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [themeSettings.isReady]);
   // 「流量明细」卡复用原资产卡的开关；单独一个开关，不跟着整排总览走。
   const showDetailCard = showHomeOverview && hasNodes && themeSettings.showAssetOverview;
   // 资产页保留悬浮入口；明细卡不再承载资产金额，避免入口丢失。
@@ -844,14 +922,11 @@ export function NodeGrid() {
       {showHomeOverview && (
         <HomeOverviewCards
           overview={displayOverview}
-          trafficTimeMode={themeSettings.trafficTimeMode}
           detailRows={detailRows}
           showDetailCard={showDetailCard}
           dense={mode === "mini" || mode === "list"}
           showOverviewRatings={themeSettings.showOverviewRatings}
-          showTrafficRating={themeSettings.showTrafficRating}
           showBandwidthRating={themeSettings.showBandwidthRating}
-          trafficRatingLabels={themeSettings.trafficRatingLabels}
           bandwidthRatingLabels={themeSettings.bandwidthRatingLabels}
         />
       )}

@@ -146,8 +146,7 @@ const OVERVIEW_RATING_LABEL_FIELDS: Array<{
   title: string;
   toggleKey: "showTrafficRating" | "showBandwidthRating" | "showAssetRating";
 }> = [
-  { key: "traffic", get title() { return t("home.totalTraffic"); }, toggleKey: "showTrafficRating" },
-  { key: "bandwidth", get title() { return t("home.liveBandwidth"); }, toggleKey: "showBandwidthRating" },
+  { key: "bandwidth", get title() { return t("home.liveBandwidth1"); }, toggleKey: "showBandwidthRating" },
 ];
 
 /** 选项多的分段控件排几列：4 个以内一行放完，再多就对半分成两行（8 个 → 4 + 4），不留孤零零的一个。 */
@@ -307,6 +306,7 @@ function pickManagedThemeSettings(settings: ResolvedThemeSettings) {
     trafficTimeMode: settings.trafficTimeMode,
     trafficIncludedNodes: settings.trafficIncludedNodes,
     speedIncludedNodes: settings.speedIncludedNodes,
+    speed2IncludedNodes: settings.speed2IncludedNodes,
     detailIncludedNodes: settings.detailIncludedNodes,
     showGroupTabs: settings.showGroupTabs,
     showRegionBar: settings.showRegionBar,
@@ -2024,6 +2024,13 @@ export function ThemeManage() {
                     nodes={sortedClients}
                     value={draft.speedIncludedNodes}
                     onChange={(next) => patch("speedIncludedNodes", next)}
+                  />
+                  <NodeChecklist
+                    title={t("settings.speed2Nodes")}
+                    hint={t("settings.speed2NodesHint")}
+                    nodes={sortedClients}
+                    value={draft.speed2IncludedNodes}
+                    onChange={(next) => patch("speed2IncludedNodes", next)}
                   />
                   <NodeChecklist
                     title={t("settings.detailNodes")}

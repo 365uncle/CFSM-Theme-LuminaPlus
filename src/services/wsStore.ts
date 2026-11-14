@@ -1460,6 +1460,11 @@ export function setDevSnapshotPolling(enabled: boolean): void {
   devSnapshotPolling = enabled;
 }
 
+/** 低频补拉完整快照：WS 不带月度累计，周期/明细需要它。 */
+export function refreshServersSnapshot(): void {
+  void syncServers(focusOnlyTarget());
+}
+
 function ensureStarted() {
   if (started) return;
   started = true;

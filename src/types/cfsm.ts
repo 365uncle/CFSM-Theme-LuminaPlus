@@ -496,6 +496,8 @@ export interface ThemeSettings {
   trafficIncludedNodes?: string[] | null;
   /** 实时速度卡独立的节点白名单，语义同 trafficIncludedNodes。 */
   speedIncludedNodes?: string[] | null;
+  /** 第二张实时带宽卡独立的节点白名单，语义同 speedIncludedNodes。 */
+  speed2IncludedNodes?: string[] | null;
   /** 明细卡显示的节点，语义同 trafficIncludedNodes（默认空）。 */
   detailIncludedNodes?: string[] | null;
   showGroupTabs?: boolean;

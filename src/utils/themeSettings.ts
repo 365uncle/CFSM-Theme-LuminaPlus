@@ -61,6 +61,8 @@ export interface ResolvedThemeSettings {
   trafficIncludedNodes: string[] | null;
   /** 实时速度卡独立的节点白名单；null = 全部，[] = 全不统计。 */
   speedIncludedNodes: string[] | null;
+  /** 第二张实时带宽卡独立的节点白名单。 */
+  speed2IncludedNodes: string[] | null;
   /** 明细卡显示节点；默认空，最多 3 台。 */
   detailIncludedNodes: string[] | null;
   showGroupTabs: boolean;
@@ -117,6 +119,7 @@ export const DEFAULT_THEME_SETTINGS: ResolvedThemeSettings = {
   trafficTimeMode: "boot",
   trafficIncludedNodes: null,
   speedIncludedNodes: null,
+  speed2IncludedNodes: null,
   detailIncludedNodes: [],
   showGroupTabs: true,
   showRegionBar: true,
@@ -291,6 +294,7 @@ export function normalizeThemeSettings(
     trafficTimeMode: normalizeTrafficTimeMode(settings?.trafficTimeMode),
     trafficIncludedNodes: normalizeNodeSelection(settings?.trafficIncludedNodes),
     speedIncludedNodes: normalizeNodeSelection(settings?.speedIncludedNodes),
+    speed2IncludedNodes: normalizeNodeSelection(settings?.speed2IncludedNodes),
     // 明细卡默认不显示任何节点；缺席与显式空数组同义。
     detailIncludedNodes: normalizeNodeSelection(settings?.detailIncludedNodes) ?? [],
     showGroupTabs: enabledUnlessFalse(settings?.showGroupTabs),
