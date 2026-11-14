@@ -161,14 +161,13 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1 / span 2;
   white-space: nowrap;
 }
 
 .traffic-detail-percent-caption {
-  color: var(--text-tertiary);
-  font-size: 20px;
-  font-weight: 560;
-  line-height: 1.2;
+  flex: 0 0 auto;
   letter-spacing: 0;
   text-align: center;
   white-space: nowrap;
@@ -191,10 +190,6 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
-  font-size: 20px;
-  font-weight: 560;
-  line-height: 1.2;
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -205,17 +200,10 @@
   display: flex;
   align-items: baseline;
   gap: 4px;
-  color: var(--text-primary);
-  font-size: 36px;
-  font-weight: 760;
-  line-height: 1;
   letter-spacing: -0.01em;
 }
 
 .traffic-detail-percent-unit {
-  color: var(--text-tertiary);
-  font-size: 22px;
-  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -233,9 +221,6 @@
   min-width: 0;
   overflow: hidden;
   justify-self: center;
-  font-size: 36px;
-  font-weight: 760;
-  line-height: 1;
   font-variant-numeric: tabular-nums;
   text-align: center;
   text-overflow: ellipsis;
@@ -246,10 +231,6 @@
   min-width: 0;
   overflow: hidden;
   justify-self: center;
-  color: var(--text-secondary);
-  font-size: 20px;
-  font-weight: 560;
-  line-height: 1.2;
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -917,6 +898,11 @@
   .home-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  /* 三卡时明细卡落到下一行并占满，避免半宽孤立。 */
+  .home-overview[data-cards="3"] .overview-card[data-metric="traffic-detail"] {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 680px) {
@@ -951,6 +937,16 @@
   .overview-card-sub {
     font-size: 11px;
     font-weight: 620;
+  }
+
+  /* 手机：总流量独占一行，百分比/名称各占三列，避免横向溢出。 */
+  .traffic-detail-percent-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .traffic-detail-total-block {
+    grid-column: 1 / -1;
+    grid-row: auto;
   }
 
   .overview-card-sub-full {

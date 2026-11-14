@@ -259,7 +259,7 @@ function HomeOverviewCards({
         <article className="overview-card" data-metric="traffic-detail">
           <div className="overview-card-head">
             <span className="overview-card-label">{t("home.trafficDetail")}</span>
-            <span className="traffic-detail-head-sub" title={trafficDetailLabel}>
+            <span className="overview-card-sub traffic-detail-head-sub" title={trafficDetailLabel}>
               {trafficDetailLabel}
             </span>
           </div>
@@ -274,27 +274,22 @@ function HomeOverviewCards({
                 gridTemplateColumns: `minmax(132px, auto) repeat(${detailRows.length}, minmax(0, 1fr))`,
               }}
             >
-              <span
-                className="traffic-detail-total-block"
-                style={{ gridColumn: 1, gridRow: "1 / span 2" }}
-              >
+              <span className="overview-card-value traffic-detail-total-block">
                 <span className="traffic-detail-percent-number">
                   {detailTotalValue}
-                  <span className="traffic-detail-percent-unit">{detailTotalUnit}</span>
+                  <span className="overview-card-unit traffic-detail-percent-unit">
+                    {detailTotalUnit}
+                  </span>
                 </span>
-                <span className="traffic-detail-percent-caption">
+                <span className="overview-card-sub traffic-detail-percent-caption">
                   {t("home.trafficDetailUsedLabel")}
                 </span>
               </span>
-              {detailRows.map((row, index) => (
+              {detailRows.map((row) => (
                 <span
                   key={`${row.uuid}-percent`}
-                  className="traffic-detail-percent-value"
-                  style={{
-                    gridColumn: index + 2,
-                    gridRow: 1,
-                    color: percentColor(row.percent),
-                  }}
+                  className="overview-card-value traffic-detail-percent-value"
+                  style={{ color: percentColor(row.percent) }}
                   title={`${row.name} · ${t("home.trafficDetailUsed", { value: formatBytes(row.used) })} · ${
                     row.unlimited
                       ? t("home.trafficDetailUnlimited")
@@ -304,11 +299,10 @@ function HomeOverviewCards({
                   {row.percent == null ? "∞" : `${row.percent}%`}
                 </span>
               ))}
-              {detailRows.map((row, index) => (
+              {detailRows.map((row) => (
                 <span
                   key={`${row.uuid}-name`}
-                  className="traffic-detail-percent-name"
-                  style={{ gridColumn: index + 2, gridRow: 2 }}
+                  className="overview-card-sub traffic-detail-percent-name"
                   title={row.name}
                 >
                   {row.shortName}
