@@ -180,6 +180,10 @@ function HomeOverviewCards({
   const [detailTotalValue, detailTotalUnit] = formatBytes(overview.trafficTotal).split(" ");
   const rate = formatByteRate(overview.netUp + overview.netDown);
   const rate2 = formatByteRate(overview.netUp2 + overview.netDown2);
+  const onlinePct =
+    overview.totalNodes > 0 ? (overview.onlineNodes / overview.totalNodes) * 100 : 0;
+  const offlinePct =
+    overview.totalNodes > 0 ? (overview.offlineNodes / overview.totalNodes) * 100 : 0;
   const trafficDetailLabel = `↑ ${formatBytes(overview.trafficUp)} · ↓ ${formatBytes(overview.trafficDown)}`;
   const bandwidthDetailLabel = `↑ ${formatByteRateLabel(overview.netUp)} · ↓ ${formatByteRateLabel(overview.netDown)}`;
   const bandwidthCompactLabel = `↑${formatCompactBytes(overview.netUp)} ↓${formatCompactBytes(overview.netDown)}`;
@@ -212,9 +216,37 @@ function HomeOverviewCards({
     // 资产卡可以单独关掉，列数跟着实际张数走，不然右边空一格。
     <section
       className={`home-overview${dense ? " is-dense" : ""}`}
-      data-cards={showDetailCard ? 3 : 2}
+      data-cards={showDetailCard ? 4 : 3}
       aria-label={t("home.overviewLabel")}
     >
+      <article className="overview-card" data-metric="online">
+        <span className="overview-card-label">{t("home.onlineNodes")}</span>
+        <div className="overview-card-main">
+          <p className="overview-card-value">
+            {overview.onlineNodes}
+            <span className="overview-card-unit">/ {overview.totalNodes}</span>
+          </p>
+        </div>
+        {overview.totalNodes >= 5 && overview.totalNodes <= 10 ? (
+          <div className="overview-blocks" role="presentation">
+            {Array.from({ length: overview.totalNodes }, (_, i) => {
+              const cls =
+                i < overview.onlineNodes
+                  ? "overview-block is-online"
+                  : i >= overview.totalNodes - overview.offlineNodes
+                    ? "overview-block is-offline"
+                    : "overview-block";
+              return <span key={i} className={cls} />;
+            })}
+          </div>
+        ) : (
+          <div className="overview-bar" role="presentation">
+            <span className="overview-bar-online" style={{ width: `${onlinePct}%` }} />
+            <span className="overview-bar-offline" style={{ width: `${offlinePct}%` }} />
+          </div>
+        )}
+      </article>
+
       <article className="overview-card" data-metric="bandwidth">
         <span className="overview-card-label">{t("home.liveBandwidth1")}</span>
         <div className="overview-card-main">
